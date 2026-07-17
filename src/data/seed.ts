@@ -38,11 +38,23 @@ export async function initSeedData() {
   const batches: InventoryBatch[] = []
   const logs: InventoryLog[] = []
 
+  // Create initial batches for ALL products so stock data is consistent
+  for (const product of products) {
+    if (product.currentStock > 0) {
+      batches.push({
+        id: generateId(), productId: product.id, productName: product.name,
+        batchNo: 'INIT-' + product.id.slice(0,6).toUpperCase(),
+        quantity: product.currentStock, costPrice: Math.round(product.sellingPrice * 0.5),
+        purchaseOrderId: 'initial_stock', receivedAt: now - 30*day,
+      })
+    }
+  }
+
   const po1: PurchaseOrder = { id: generateId(), orderNo: generateOrderNo('PO'), supplierId: suppliers[0].id, supplierName: suppliers[0].name, items: [
     { productId: products[0].id, productName: products[0].name, quantity: 20, unitPrice: 4500, subtotal: 90000 },
     { productId: products[1].id, productName: products[1].name, quantity: 15, unitPrice: 5000, subtotal: 75000 },
     { productId: products[2].id, productName: products[2].name, quantity: 10, unitPrice: 3800, subtotal: 38000 },
-    { productId: products[3].id, productName: products[3].name, quantity: 10, unitPrice: 8500, subtotal: 85000 },
+    { productId: products[4].id, productName: products[4].name, quantity: 10, unitPrice: 8500, subtotal: 85000 },
   ], totalAmount: 288000, status: 'received', createdAt: now - 20*day }
   await putAll('purchaseOrders', [po1])
 
@@ -66,6 +78,7 @@ export async function initSeedData() {
 
   await putAll('inventoryBatches', batches)
 
+  // Sales — only sell from products that have enough stock in purchased batches
   const so1: SalesOrder = { id: generateId(), orderNo: generateOrderNo('SO'), items: [
     { productId: products[0].id, productName: products[0].name, quantity: 5, sellingPrice: 6800, costPrice: 4500, profit: 11500 },
     { productId: products[1].id, productName: products[1].name, quantity: 10, sellingPrice: 7800, costPrice: 5000, profit: 28000 },
@@ -81,7 +94,7 @@ export async function initSeedData() {
   await putAll('inventoryBatches', batches)
 
   const so2: SalesOrder = { id: generateId(), orderNo: generateOrderNo('SO'), items: [
-    { productId: products[3].id, productName: products[3].name, quantity: 2, sellingPrice: 12800, costPrice: 8500, profit: 8600 },
+    { productId: products[4].id, productName: products[4].name, quantity: 2, sellingPrice: 12800, costPrice: 8500, profit: 8600 },
     { productId: products[6].id, productName: products[6].name, quantity: 5, sellingPrice: 4800, costPrice: 3000, profit: 9000 },
   ], totalAmount: 49600, totalProfit: 17600, status: 'completed', createdAt: now - 3*day }
   await putAll('salesOrders', [so2])
@@ -94,6 +107,7 @@ export async function initSeedData() {
   await putAll('inventoryBatches', batches)
   await putAll('inventoryLogs', logs)
 
+  // Reconcile currentStock from actual batch quantities
   for (const product of products) {
     const productBatches = batches.filter(b => b.productId === product.id)
     product.currentStock = productBatches.reduce((sum, b) => sum + b.quantity, 0)
