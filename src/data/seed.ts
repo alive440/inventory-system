@@ -1,10 +1,20 @@
-import { getAll, putAll } from './db'
+import { getAll, putAll, clearStore } from './db'
 import { generateId, generateOrderNo } from './types'
 import type { Product, Supplier, PurchaseOrder, SalesOrder, InventoryBatch, InventoryLog } from './types'
 
+const SEED_VERSION = 2 // Bump this to force re-seed after schema/data changes
+
 export async function initSeedData() {
   const existing = await getAll<Product>('products')
-  if (existing.length > 0) return
+  // Check version — re-seed if data is from old version
+  const versionFlag = localStorage.getItem('seed_version')
+  if (existing.length > 0 && versionFlag === String(SEED_VERSION)) return
+
+  // Clear old data if version mismatch
+  if (existing.length > 0) {
+    const stores = ['products','suppliers','purchaseOrders','salesOrders','inventoryBatches','inventoryLogs']
+    for (const store of stores) { await clearStore(store) }
+  }
 
   const now = Date.now()
   const day = 86400000
@@ -38,7 +48,7 @@ export async function initSeedData() {
   const batches: InventoryBatch[] = []
   const logs: InventoryLog[] = []
 
-  // Create initial batches for ALL products so stock data is consistent
+  // Create initial batches for all products so stock data is consistent
   for (const product of products) {
     if (product.currentStock > 0) {
       batches.push({
@@ -78,7 +88,6 @@ export async function initSeedData() {
 
   await putAll('inventoryBatches', batches)
 
-  // Sales — only sell from products that have enough stock in purchased batches
   const so1: SalesOrder = { id: generateId(), orderNo: generateOrderNo('SO'), items: [
     { productId: products[0].id, productName: products[0].name, quantity: 5, sellingPrice: 6800, costPrice: 4500, profit: 11500 },
     { productId: products[1].id, productName: products[1].name, quantity: 10, sellingPrice: 7800, costPrice: 5000, profit: 28000 },
@@ -113,4 +122,6 @@ export async function initSeedData() {
     product.currentStock = productBatches.reduce((sum, b) => sum + b.quantity, 0)
   }
   await putAll('products', products)
+
+  localStorage.setItem('seed_version', String(SEED_VERSION))
 }
