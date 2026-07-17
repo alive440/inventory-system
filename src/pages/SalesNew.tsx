@@ -6,142 +6,27 @@ import { generateId, generateOrderNo } from '../data/types'
 import { formatPrice } from '../utils/format'
 import { fifoDeduction, calculateWeightedCost } from '../utils/fifo'
 import ScanInput from '../components/ScanInput'
+import { FormSkeleton } from '../components/Skeleton'
+import { useToast } from '../components/Toast'
 import type { Product, SalesOrder, InventoryBatch, InventoryLog, SalesItem } from '../data/types'
 
 export default function SalesNew() {
-  const navigate = useNavigate()
-  const [products, setProducts] = useState<Product[]>([])
-  const [batches, setBatches] = useState<InventoryBatch[]>([])
-  const [items, setItems] = useState<(SalesItem & { key: string })[]>([])
-  const [error, setError] = useState('')
-  const [preview, setPreview] = useState<{ cost: number; profit: number } | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    (async () => { await initSeedData(); const [p, b] = await Promise.all([getAll<Product>('products'), getAll<InventoryBatch>('inventoryBatches')]); setProducts(p.filter(p => p.isActive)); setBatches(b); setLoading(false) })()
-  }, [])
+  const navigate = useNavigate(); const toast = useToast()
+  const [products, setProducts] = useState<Product[]>([]); const [batches, setBatches] = useState<InventoryBatch[]>([])
+  const [items, setItems] = useState<(SalesItem & { key: string })[]>([]); const [error, setError] = useState('')
+  const [preview, setPreview] = useState<{ cost: number; profit: number } | null>(null); const [loading, setLoading] = useState(true)
+  useEffect(() => { (async () => { await initSeedData(); const [p, b] = await Promise.all([getAll<Product>('products'), getAll<InventoryBatch>('inventoryBatches')]); setProducts(p.filter(p => p.isActive)); setBatches(b); setLoading(false) })() }, [])
 
   const addItem = () => { setItems(prev => [...prev, { key: generateId(), productId: '', productName: '', quantity: 1, sellingPrice: 0, costPrice: 0, profit: 0 }]); setPreview(null); setError('') }
-
-  const updateItem = (key: string, field: string, value: string | number) => {
-    setItems(prev => {
-      const updated = prev.map(item => {
-        if (item.key !== key) return item
-        const u = { ...item, [field]: value }
-        if (field === 'productId') { const p = products.find(p => p.id === value); u.productName = p?.name || ''; u.sellingPrice = p?.sellingPrice || 0; u.costPrice = 0; u.profit = 0 }
-        return u
-      })
-      setTimeout(() => calcPreview(updated), 0)
-      return updated
-    })
-    setError('')
-  }
-
+  const updateItem = (key: string, field: string, value: string | number) => { setItems(prev => { const updated = prev.map(item => { if (item.key !== key) return item; const u = { ...item, [field]: value }; if (field === 'productId') { const p = products.find(p => p.id === value); u.productName = p?.name || ''; u.sellingPrice = p?.sellingPrice || 0; u.costPrice = 0; u.profit = 0 } return u }); setTimeout(() => calcPreview(updated), 0); return updated }); setError('') }
   const removeItem = (key: string) => { setItems(prev => prev.filter(i => i.key !== key)); setPreview(null) }
-
-  const calcPreview = (currentItems = items) => {
-    if (currentItems.length === 0) { setPreview(null); return }
-    let totalCost = 0; let totalSelling = 0
-    for (const item of currentItems) {
-      if (!item.productId || item.quantity <= 0) continue
-      const productBatches = batches.filter(b => b.productId === item.productId)
-      const totalStock = productBatches.reduce((s, b) => s + b.quantity, 0)
-      if (item.quantity > totalStock) { const p = products.find(p => p.id === item.productId); setError('「' + (p?.name || item.productName) + '」库存不足！需要 ' + item.quantity + '，可用 ' + totalStock); setPreview(null); return }
-      const result = fifoDeduction(productBatches, item.quantity)
-      if (!result.ok) { setError(result.error || '库存不足'); setPreview(null); return }
-      const cost = calculateWeightedCost(result.deductions)
-      totalCost += cost * item.quantity
-      totalSelling += item.sellingPrice * item.quantity
-    }
-    setError('')
-    setPreview({ cost: totalCost, profit: totalSelling - totalCost })
-  }
-
+  const calcPreview = (currentItems = items) => { if (currentItems.length === 0) { setPreview(null); return }; let totalCost = 0; let totalSelling = 0; for (const item of currentItems) { if (!item.productId || item.quantity <= 0) continue; const pBatches = batches.filter(b => b.productId === item.productId); const totalStock = pBatches.reduce((s, b) => s + b.quantity, 0); if (item.quantity > totalStock) { const p = products.find(p => p.id === item.productId); setError('「' + (p?.name || item.productName) + '」库存不足！需要 ' + item.quantity + '，可用 ' + totalStock); setPreview(null); return }; const result = fifoDeduction(pBatches, item.quantity); if (!result.ok) { setError(result.error || '库存不足'); setPreview(null); return }; const cost = calculateWeightedCost(result.deductions); totalCost += cost * item.quantity; totalSelling += item.sellingPrice * item.quantity } setError(''); setPreview({ cost: totalCost, profit: totalSelling - totalCost }) }
   useEffect(() => { if (items.length > 0) calcPreview() }, [batches])
-
   const totalAmount = items.reduce((sum, i) => sum + i.sellingPrice * i.quantity, 0)
 
-  const handleSubmit = async () => {
-    if (items.length === 0) return
-    if (error) return
-    const salesItems: SalesItem[] = []
-    const logs: InventoryLog[] = []
-    const updatedBatches = batches.map(b => ({ ...b }))
-    const updatedProducts = products.map(p => ({ ...p }))
-    for (const item of items) {
-      const productBatches = updatedBatches.filter(b => b.productId === item.productId)
-      const result = fifoDeduction(productBatches, item.quantity)
-      if (!result.ok) { setError(result.error || '库存不足'); return }
-      const cost = calculateWeightedCost(result.deductions)
-      salesItems.push({ productId: item.productId, productName: item.productName, quantity: item.quantity, sellingPrice: item.sellingPrice, costPrice: cost, profit: item.sellingPrice * item.quantity - cost * item.quantity })
-      for (const d of result.deductions) {
-        const batch = updatedBatches.find(b => b.id === d.batch.id)
-        if (batch) batch.quantity -= d.deductedQuantity
-        logs.push({ id: generateId(), type: 'out', productId: item.productId, productName: item.productName, quantity: d.deductedQuantity, batchNo: d.batch.batchNo, relatedOrderId: '', relatedOrderType: 'sales', createdAt: Date.now() })
-      }
-      const prod = updatedProducts.find(p => p.id === item.productId)
-      if (prod) { prod.currentStock -= item.quantity; prod.updatedAt = Date.now() }
-    }
-    const order: SalesOrder = { id: generateId(), orderNo: generateOrderNo('SO'), items: salesItems, totalAmount, totalProfit: salesItems.reduce((s, i) => s + i.profit, 0), status: 'completed', createdAt: Date.now() }
-    logs.forEach(l => l.relatedOrderId = order.id)
-    await putAll('inventoryBatches', updatedBatches)
-    await putAll('products', updatedProducts)
-    await putAll('inventoryLogs', logs)
-    await putAll('salesOrders', [order])
-    navigate('/sales')
-  }
+  const handleSubmit = async () => { if (items.length === 0 || error) return; const salesItems: SalesItem[] = []; const logs: InventoryLog[] = []; const updatedBatches = batches.map(b => ({ ...b })); const updatedProducts = products.map(p => ({ ...p })); for (const item of items) { const pBatches = updatedBatches.filter(b => b.productId === item.productId); const result = fifoDeduction(pBatches, item.quantity); if (!result.ok) { setError(result.error || '库存不足'); return }; const cost = calculateWeightedCost(result.deductions); salesItems.push({ productId: item.productId, productName: item.productName, quantity: item.quantity, sellingPrice: item.sellingPrice, costPrice: cost, profit: item.sellingPrice * item.quantity - cost * item.quantity }); for (const d of result.deductions) { const batch = updatedBatches.find(b => b.id === d.batch.id); if (batch) batch.quantity -= d.deductedQuantity; logs.push({ id: generateId(), type: 'out', productId: item.productId, productName: item.productName, quantity: d.deductedQuantity, batchNo: d.batch.batchNo, relatedOrderId: '', relatedOrderType: 'sales', createdAt: Date.now() }) }; const prod = updatedProducts.find(p => p.id === item.productId); if (prod) { prod.currentStock -= item.quantity; prod.updatedAt = Date.now() } }; const order: SalesOrder = { id: generateId(), orderNo: generateOrderNo('SO'), items: salesItems, totalAmount, totalProfit: salesItems.reduce((s, i) => s + i.profit, 0), status: 'completed', createdAt: Date.now() }; logs.forEach(l => l.relatedOrderId = order.id); await putAll('inventoryBatches', updatedBatches); await putAll('products', updatedProducts); await putAll('inventoryLogs', logs); await putAll('salesOrders', [order]); toast.show('销售出库成功，毛利 ' + formatPrice(order.totalProfit), 'success'); navigate('/sales') }
 
-  if (loading) return <div className="empty-state"><div className="empty-icon">⏳</div><h3>加载中...</h3></div>
+  if (loading) return <FormSkeleton />
 
-  return (
-    <div>
-      <div className="page-header">
-        <div><h1 className="page-title">新建销售单</h1><p className="page-subtitle">系统自动按先进先出匹配批次，实时计算毛利</p></div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-secondary" onClick={() => navigate('/sales')}>取消</button>
-          <button className="btn btn-primary" onClick={handleSubmit} disabled={items.length === 0 || !!error}>确认出库</button>
-        </div>
-      </div>
-      <div className="card">
-        <ScanInput placeholder="扫描条码快速添加商品..." onScan={(barcode) => {
-          const prod = products.find(p => p.barcode === barcode)
-          if (prod) {
-            setItems(prev => {
-              const exists = prev.find(i => i.productId === prod.id)
-              if (exists) return prev.map(i => i.key === exists.key ? { ...i, quantity: i.quantity + 1 } : i)
-              return [...prev, { key: generateId(), productId: prod.id, productName: prod.name, quantity: 1, sellingPrice: prod.sellingPrice, costPrice: 0, profit: 0 }]
-            })
-            setTimeout(() => calcPreview(), 0)
-          } else { alert('未找到条码：' + barcode) }
-        }} />
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 600 }}>销售商品</h3>
-          <button className="btn btn-sm btn-secondary" onClick={addItem}>+ 添加商品</button>
-        </div>
-        {items.length > 0 && <div className="form-row-header"><span>商品</span><span>数量</span><span>售价（元）</span><span></span></div>}
-        {items.map(item => {
-          const stock = batches.filter(b => b.productId === item.productId).reduce((s, b) => s + b.quantity, 0)
-          return (
-            <div key={item.key} className="form-row">
-              <select className="form-select" value={item.productId} onChange={e => updateItem(item.key, 'productId', e.target.value)}>
-                <option value="">选择商品</option>
-                {products.map(p => <option key={p.id} value={p.id}>{p.name} (库存:{p.currentStock})</option>)}
-              </select>
-              <input className="form-input" type="number" min={1} max={stock} value={item.quantity} onChange={e => updateItem(item.key, 'quantity', parseInt(e.target.value) || 0)} />
-              <input className="form-input" type="number" value={item.sellingPrice / 100} readOnly style={{ background: 'rgba(255,255,255,0.02)', color: '#888' }} />
-              <button className="btn btn-sm btn-danger" onClick={() => removeItem(item.key)}>✕</button>
-            </div>
-          )
-        })}
-        {error && <div className="alert-item" style={{ marginTop: 8 }}><span>{error}</span></div>}
-        {preview && (
-          <div className="total-summary">
-            <div className="total-item"><div className="label">销售额</div><div className="value">{formatPrice(totalAmount)}</div></div>
-            <div className="total-item"><div className="label">成本（FIFO）</div><div className="value">{formatPrice(preview.cost)}</div></div>
-            <div className="total-item"><div className="label">毛利</div><div className="value green">{formatPrice(preview.profit)}</div></div>
-          </div>
-        )}
-      </div>
-    </div>
-  )
+  return (<div><div className="page-header"><div><h1 className="page-title">新建销售单</h1><p className="page-subtitle">系统自动按先进先出匹配批次，实时计算毛利</p></div><div style={{ display: 'flex', gap: 8 }}><button className="btn btn-secondary" onClick={() => navigate('/sales')}>取消</button><button className="btn btn-primary" onClick={handleSubmit} disabled={items.length === 0 || !!error}>确认出库</button></div></div><div className="card"><ScanInput placeholder="扫描条码快速添加商品..." onScan={(barcode) => { const prod = products.find(p => p.barcode === barcode); if (prod) { setItems(prev => { const exists = prev.find(i => i.productId === prod.id); if (exists) return prev.map(i => i.key === exists.key ? { ...i, quantity: i.quantity + 1 } : i); return [...prev, { key: generateId(), productId: prod.id, productName: prod.name, quantity: 1, sellingPrice: prod.sellingPrice, costPrice: 0, profit: 0 }] }); setTimeout(() => calcPreview(), 0); toast.show('已扫码: ' + prod.name, 'info') } else { toast.show('未找到条码: ' + barcode, 'error') } }} /><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}><h3 style={{ fontSize: 14, fontWeight: 600 }}>销售商品</h3><button className="btn btn-sm btn-secondary" onClick={addItem}>+ 添加商品</button></div>{items.length > 0 && <div className="form-row-header"><span>商品</span><span>数量</span><span>售价（元）</span><span></span></div>}{items.map(item => { const stock = batches.filter(b => b.productId === item.productId).reduce((s, b) => s + b.quantity, 0); return (<div key={item.key} className="form-row"><select className="form-select" value={item.productId} onChange={e => updateItem(item.key, 'productId', e.target.value)}><option value="">选择商品</option>{products.map(p => <option key={p.id} value={p.id}>{p.name} (库存:{p.currentStock})</option>)}</select><input className="form-input" type="number" min={1} max={stock} value={item.quantity} onChange={e => updateItem(item.key, 'quantity', parseInt(e.target.value) || 0)} /><input className="form-input" type="number" value={item.sellingPrice / 100} readOnly style={{ background: 'rgba(255,255,255,0.02)', color: '#888' }} /><button className="btn btn-sm btn-danger" onClick={() => removeItem(item.key)}>✕</button></div>)})}{error && <div className="alert-item" style={{ marginTop: 8 }}><span>{error}</span></div>}{preview && (<div className="total-summary"><div className="total-item"><div className="label">销售额</div><div className="value">{formatPrice(totalAmount)}</div></div><div className="total-item"><div className="label">成本（FIFO）</div><div className="value">{formatPrice(preview.cost)}</div></div><div className="total-item"><div className="label">毛利</div><div className="value green">{formatPrice(preview.profit)}</div></div></div>)}</div></div>)
 }
