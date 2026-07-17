@@ -15,6 +15,7 @@
 }
 
 @keyframes slideIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg-primary); color: var(--text-primary); min-height: 100vh; }
 .layout { display: flex; min-height: 100vh; }
@@ -110,4 +111,15 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
   .main-content { padding: 16px; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .cards-grid { grid-template-columns: 1fr; }
+}
+@media print {
+  .sidebar, .btn, .filter-bar, .search-bar, .action-bar, .ToastProvider, button { display: none !important; }
+  body { background: white; color: black; }
+  .main-content { padding: 0; }
+  .card { background: white; border: 1px solid #ddd; box-shadow: none; }
+  .stat-card { background: #f9f9f9; border: 1px solid #ddd; }
+  .page-title, .stat-value, .section-title { color: #000 !important; }
+  .data-table th { background: #eee; color: #000; }
+  .data-table td { color: #333; border-color: #ddd; }
+  .stat-label, .card-label, .text-muted, .page-subtitle { color: #666 !important; }
 }
