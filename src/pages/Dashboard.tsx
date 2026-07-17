@@ -17,7 +17,6 @@ function StatusBadge({ status }: { status: string }) {
   return <span className="status-badge" style={{ color: m.color, background: m.color + '20', border: '1px solid ' + m.color + '40' }}>{m.label}</span>
 }
 
-// SVG Donut Chart
 function DonutChart({ data, total }: { data: { name: string; value: number; color: string }[]; total: number }) {
   const size = 140; const cx = size/2; const cy = size/2; const r = 55; const stroke = 18
   let offset = 0
@@ -33,7 +32,7 @@ function DonutChart({ data, total }: { data: { name: string; value: number; colo
             strokeDasharray={`${dash} ${gap}`} strokeDashoffset={-o}
             style={{ transform: 'rotate(-90deg)', transformOrigin: `${cx}px ${cy}px`, transition: 'stroke-dasharray 0.6s ease' }} />
         })}
-        <text x={cx} y={cy-8} textAnchor="middle" fill="#fff" fontSize={18} fontWeight={800}>{total > 0 ? Math.round(total) : 0}</text>
+        <text x={cx} y={cy-8} textAnchor="middle" fill="#fff" fontSize={18} fontWeight={800}>{total > 0 ? Math.round(total) + '¥' : '0'}</text>
         <text x={cx} y={cy+12} textAnchor="middle" fill="#888" fontSize={10}>总毛利</text>
       </svg>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
@@ -48,9 +47,7 @@ export default function Dashboard() {
   const [salesOrders, setSalesOrders] = useState<SalesOrder[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [loading, setLoading] = useState(true)
-
   useEffect(() => { (async () => { await initSeedData(); const [p, s, sup] = await Promise.all([getAll<Product>('products'), getAll<SalesOrder>('salesOrders'), getAll<Supplier>('suppliers')]); setProducts(p); setSalesOrders(s); setSuppliers(sup); setLoading(false) })() }, [])
-
   if (loading) return <DashboardSkeleton />
 
   const alertProducts = products.filter(p => p.currentStock < p.safetyStock)
@@ -60,17 +57,15 @@ export default function Dashboard() {
   const monthProfit = monthSales.reduce((sum, s) => sum + s.totalProfit, 0)
   const margin = monthRevenue > 0 ? Math.round((monthProfit / monthRevenue) * 100) : 0
 
-  // Category profit breakdown
-  const catProfit: Record<string, { name: string; profit: number }> = {}
-  monthSales.forEach(s => s.items.forEach(i => { const p = products.find(p => p.id === i.productId); const cat = p?.category || '其他'; if (!catProfit[cat]) catProfit[cat] = { name: cat, profit: 0 }; catProfit[cat].profit += i.profit }))
+  const catProfit: Record<string, { name: string; value: number }> = {}
+  monthSales.forEach(s => s.items.forEach(i => { const p = products.find(p => p.id === i.productId); const cat = p?.category || '其他'; if (!catProfit[cat]) catProfit[cat] = { name: cat, value: 0 }; catProfit[cat].value += i.profit }))
   const catColors = ['#d4a574','#4dbd90','#6495ed','#fa0','#f66','#a78bfa']
-  const catData = Object.values(catProfit).sort((a,b) => b.profit - a.profit).map((c,i) => ({ ...c, color: catColors[i % catColors.length] }))
+  const catData = Object.values(catProfit).sort((a,b) => b.value - a.value).map((c,i) => ({ ...c, color: catColors[i % catColors.length] }))
 
   const profitMap: Record<string, { name: string; profit: number }> = {}
   monthSales.forEach(s => s.items.forEach(i => { if (!profitMap[i.productId]) profitMap[i.productId] = { name: i.productName, profit: 0 }; profitMap[i.productId].profit += i.profit }))
   const top5 = Object.values(profitMap).sort((a, b) => b.profit - a.profit).slice(0, 5)
 
-  // Sales trend
   const days: Record<string, number> = {}
   for (let i = 13; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); days[(d.getMonth()+1)+'/'+d.getDate()] = 0 }
   salesOrders.filter(s => s.status === 'completed').forEach(s => { const d = new Date(s.createdAt); const key = (d.getMonth()+1)+'/'+d.getDate(); if (days[key] !== undefined) days[key] += s.totalAmount/100 })
@@ -89,7 +84,7 @@ export default function Dashboard() {
         <div className="card"><TrendChart data={chartData} title="近14天销售趋势（元）" height={140} /></div>
         <div className="card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
           <h4 style={{ fontSize: 13, fontWeight: 600, color: '#888', marginBottom: 12 }}>品类毛利分布</h4>
-          <DonutChart data={catData} total={catData.reduce((s,c)=>s+c.profit/100,0)} />
+          <DonutChart data={catData} total={catData.reduce((s,c)=>s+c.value/100,0)} />
         </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
@@ -100,8 +95,7 @@ export default function Dashboard() {
           {top5.length === 0 ? <p className="text-muted">本月暂无销售数据</p> : top5.map((item, idx) => (<div key={idx} className="rank-item"><span className="rank-num">{idx + 1}</span><span className="rank-name">{item.name}</span><span className="rank-profit">{formatPrice(item.profit)}</span></div>))}
         </div>
       </div>
-      {alertProducts.length > 0 && (<div className="card" style={{ marginTop: 16 }}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}><h3 className="section-title" style={{ marginBottom: 0 }}>采购建议清单</h3><button className="btn btn-sm btn-primary" onClick={() => { exportCSV('采购建议清单', ['商品','当前库存','安全线','建议采购量','推荐供应商'], alertProducts.map(p => { const supplier = suppliers.find(s => s.supplyProductIds.includes(p.id)); return [p.name, p.currentStock, p.safetyStock, p.safetyStock * 2 - p.currentStock, supplier?.name || '未指定'] })) }}>导出采购单</button></div><table className="data-table"><thead><tr><th>商品</th><th>当前库存</th><th>安全线</th><th>建议采购</th><th>推荐供应商</th></tr></thead><tbody>{alertProducts.map(p => { const supplier = suppliers.find(s => s.supplyProductIds.includes(p.id)); return (<tr key={p.id}><td style={{ fontWeight: 600 }}>{p.name}</td><td style={{ color: 'var(--red)', fontWeight: 600 }}>{p.currentStock}</td><td style={{ color: '#888' }}>{p.safetyStock}</td><td style={{ color: 'var(--gold)', fontWeight: 700 }}>{p.safetyStock * 2 - p.currentStock}</td><td style={{ color: supplier ? '#ccc' : '#888' }}>{supplier?.name || '未指定供应商'}</td></tr>) })}
-          </tbody></table></div>)}
+      {alertProducts.length > 0 && (<div className="card" style={{ marginTop: 16 }}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}><h3 className="section-title" style={{ marginBottom: 0 }}>采购建议清单</h3><button className="btn btn-sm btn-primary" onClick={() => { exportCSV('采购建议清单', ['商品','当前库存','安全线','建议采购量','推荐供应商'], alertProducts.map(p => { const supplier = suppliers.find(s => s.supplyProductIds.includes(p.id)); return [p.name, p.currentStock, p.safetyStock, p.safetyStock * 2 - p.currentStock, supplier?.name || '未指定'] })) }}>导出采购单</button></div><table className="data-table"><thead><tr><th>商品</th><th>当前库存</th><th>安全线</th><th>建议采购</th><th>推荐供应商</th></tr></thead><tbody>{alertProducts.map(p => { const supplier = suppliers.find(s => s.supplyProductIds.includes(p.id)); return (<tr key={p.id}><td style={{ fontWeight: 600 }}>{p.name}</td><td style={{ color: 'var(--red)', fontWeight: 600 }}>{p.currentStock}</td><td style={{ color: '#888' }}>{p.safetyStock}</td><td style={{ color: 'var(--gold)', fontWeight: 700 }}>{p.safetyStock * 2 - p.currentStock}</td><td style={{ color: supplier ? '#ccc' : '#888' }}>{supplier?.name || '未指定供应商'}</td></tr>) })}</tbody></table></div>)}
     </div>
   )
 }
